@@ -1,0 +1,56 @@
+library(rmr2)
+
+countrycode =
+	function(input, output, pattern=","){
+		
+	cc.map = function(., lines) {
+		keyval(matrix(unlist(strsplit(lines, pattern)), ncol=5, byrow=TRUE)[,4], '1')
+	}
+
+	cc.reduce = function(code, counts) {
+		keyval(code, 
+			toString(sum(as.integer(counts))))
+	}
+
+	mapreduce(
+		input=input,
+		output=output,
+		map=cc.map,
+		reduce=cc.reduce,
+		combine=TRUE,
+		input.format=make.input.format("text")
+	)
+}
+
+inputPath="/Project/Customers.csv"
+outputPath="/Project/output"
+countrycode(inputPath, outputPath)
+
+results <- from.dfs(outputPath)
+
+x <- results$key
+y <- as.integer(results$val)
+
+barplot(y, main="Country Code Residents", xlab="Country Code", ylab="Num Residents", names.arg=x)
+
+## now we sort 
+is_sorted = FALSE
+while(!is_sorted) {
+	is_sorted = TRUE
+	for (i in 1:(length(y)-1)) {
+		first = y[i]
+		second = y[i+1]
+		if (first > second) {
+			y[i] = second
+			y[i+1] = first
+			first = x[i]
+			second = x[i+1]
+			x[i] = second
+			x[i+1] = first
+			is_sorted = FALSE
+		}
+	}
+}
+
+barplot(y, main="Country Code Residents", xlab="Country Code", ylab="Num Residents", names.arg=x)
+
