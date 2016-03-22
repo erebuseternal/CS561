@@ -46,6 +46,62 @@ public class SpatialJoin {
 			y_max = top_bound;
 		}
 		
+		// this method takes x,y coordinates and returns the x and y index of the partition to which these belong as a Integer array
+		public Integer[] getPartition(double x, double y) {
+			// first we prepare x and y
+			int flr_x = (int) Math.floor(x);
+			int flr_y = (int) Math.floor(y);
+						
+			// next we get the closest (lower) multiple to five and twenty respectively
+			int mod_x = flr_x % 5;
+			int new_x = flr_x - mod_x;
+			int mod_y = flr_y % 20;
+			int new_y = flr_y - mod_y;
+						
+			// for consistency, we need to check to make sure that new_x and new_y are not y_min or y_max
+			// in which case we need to decrement them by 5 or 20 respectively so they are not found in the 
+			// partition that starts at y_max or x_max which doesn't exist
+			if (new_x == x_max) {
+				// this will put it in the appropriate partition
+				new_x = new_x - 5;
+			}
+			if (new_y == y_max) {
+				new_y = new_y + 20;
+			}
+						
+			// now we get the x and y indexes (indexes of the partition this point is in)
+			int x_index = (int)((new_x - x_min) / 5);
+			int y_index = (int)((new_y - y_min) / 20);
+			
+			return new Integer[] {new Integer(x_index), new Integer(y_index)};
+		}
+		
+		/* now we are going to image that we have broken up the space set by the bounds 
+		 into rectangles of height 20 and width 5. (Where rectangles can overlap at the top
+		 and right of our space. This means we have divided our space up into the maximum size of 
+		 the rectangles in our rectangles data set. Now in another mapper we are going to send 
+		 each rectangle in our data to the rectangle in our space that holds the former's top left
+		 corner. (or for rectangle's outside of the bound we will send it to the dividing rectangle 
+		 that is above the one containing the lower right hand corner. The reason for this will become 
+		 clear in a moment.) Now for the rectangles that are placed by top left corner they might 
+		 extend into the 'partitioning' rectangles directly below them, to the right, or both. Therefore 
+		 in order to send each point to all of the partitions that might contain the left hand corner of 
+		 a rectangle containing them, we have to attach the point's value to the partition to which 
+		 it belongs as well as the ones directly above, to the left, and both (if they exist). This way
+		 if one of those have the top left corner of a rectangle that extends to the partition to 
+		 which the point actually belongs, that point will be considered for the rectangle in the reducer.*/
+		
+		/*
+		 * To turn each partition into a key (to be used for the reducer) we will say that the bottom 
+		 * partition is 0,0 the one to its right is 0,1 the one directly above it 1,1 and so forth.
+		 * Therefore for each of these points we are going to find its partition (and thus key) by 
+		 * getting its x value to the nearest lower multiple of five and its y value to the nearest lower 
+		 * multiple of 20. Then take each of these and divide by 5 and 20 respectively to get the two 
+		 * values of our key. Then we will subtract one from each individually and then both 
+		 * to get the other possible keys. We will make sure these keys are in our bounds and then send 
+		 * them off!
+		 */
+		
 		public void map(LongWritable key, Text value, Context context) {
 			// first we split the value into its parts 
 			// I expect the value to be in the form x,y
@@ -61,57 +117,28 @@ public class SpatialJoin {
 				return;
 			}
 			
-			/* now we are going to image that we have broken up the space set by the bounds 
-			 into rectangles of height 20 and width 5. (Where rectangles can overlap at the top
-			 and right of our space. This means we have divided our space up into the maximum size of 
-			 the rectangles in our rectangles data set. Now in another mapper we are going to send 
-			 each rectangle in our data to the rectangle in our space that holds the former's top left
-			 corner. (or for rectangle's outside of the bound we will send it to the dividing rectangle 
-			 that is above the one containing the lower right hand corner. The reason for this will become 
-			 clear in a moment.) Now for the rectangles that are placed by top left corner they might 
-			 extend into the 'partitioning' rectangles directly below them, to the right, or both. Therefore 
-			 in order to send each point to all of the partitions that might contain the left hand corner of 
-			 a rectangle containing them, we have to attach the point's value to the partition to which 
-			 it belongs as well as the ones directly above, to the left, and both (if they exist). This way
-			 if one of those have the top left corner of a rectangle that extends to the partition to 
-			 which the point actually belongs, that point will be considered for the rectangle in the reducer.*/
+			// now we get the partition this point lies in
+			Integer[] indexes = getPartition(x,y);
 			
-			/*
-			 * To turn each partition into a key (to be used for the reducer) we will say that the bottom 
-			 * partition is 0,0 the one to its right is 0,1 the one directly above it 1,1 and so forth.
-			 * Therefore for each of these points we are going to find its partition (and thus key) by 
-			 * getting its x value to the nearest lower multiple of five and its y value to the nearest lower 
-			 * multiple of 20. Then take each of these and divide by 5 and 20 respectively to get the two 
-			 * values of our key. Then we will subtract one from each individually and then both 
-			 * to get the other possible keys. We will make sure these keys are in our bounds and then send 
-			 * them off!
-			 */
-			
-			// first we prepare x and y
-			int flr_x = (int) Math.floor(x);
-			int flr_y = (int) Math.floor(y);
-			
-			// next we get the closest multiple to five and twenty respectively
-			int mod_x = flr_x % 5;
-			int new_x = flr_x - mod_x;
-			int mod_y = flr_y % 20;
-			int new_y = flr_y - mod_y;
-			
-			// now we get the x and y indexes
-			int x_index = (int)((new_x - x_min) / 5);
-			int y_index = (int)((new_y - y_min) / 20);
-			Text out_key = new Text(new Integer(x_index).toString() + "," + new Integer(y_index).toString());
-			
+			// now we get the x and y indexes (indexes of the partition this point is in)
+			Integer x_index = indexes[0];
+			Integer y_index = indexes[1];
 			// we write out our first key pair
+			Text out_key = new Text(x_index.toString() + "," + y_index.toString());
 			try {
 				context.write(out_key, value);
 			} catch(Exception e) {
 			}
 			
-			// now we look at the partition above
+			// next we will check that the partitions above, to the left, and above-left exist
+			// if they do we will assign this point to those partitions as well.
+			
+			// we check for the partition above
+			// note it is less than rather than less than or equal to, because equal to would 
+			// mean the point initially laid in the partition that started at y_max
 			if ((y_index + 1) * 20 + y_min < y_max) {
 				// we generate the key
-				out_key = new Text(new Integer(x_index).toString() + "," + new Integer(y_index + 1).toString());
+				out_key = new Text(x_index.toString() + "," + new Integer(y_index + 1).toString());
 				// we send the key-pair
 				try {
 					context.write(out_key, value);
@@ -119,20 +146,20 @@ public class SpatialJoin {
 				}
 			}
 			
-			// now we look at the partition to the left 
-			if ((x_index - 1) * 5  + x_min > x_min) {
+			// now we check for the partition to the left 
+			if ((x_index - 1) * 5  + x_min >= x_min) {
 				// we generate the key
-				out_key = new Text(new Integer(x_index + 1).toString() + "," + new Integer(y_index).toString());
+				out_key = new Text(new Integer(x_index - 1).toString() + "," + y_index.toString());
 				// we send the key-pair
 				try {
 					context.write(out_key, value);
 				} catch(Exception e) {
 				}
 				
-				// next we look to see if up and left is okay
-				if ((y_index + 1) * 20 + y_min <= y_max) {
+				// next we check to see if left is also okay so we can get up and to the left
+				if ((y_index + 1) * 20 + y_min < y_max) {
 					// we generate the key
-					out_key = new Text(new Integer(x_index + 1).toString() + "," + new Integer(y_index + 1).toString());
+					out_key = new Text(new Integer(x_index - 1).toString() + "," + new Integer(y_index + 1).toString());
 					// we send the key-pair
 					try {
 						context.write(out_key, value);
@@ -140,7 +167,6 @@ public class SpatialJoin {
 					}
 				}
 			}
-			// and that's it!
 		}
 
 	}
@@ -156,6 +182,36 @@ public class SpatialJoin {
 			x_max = right_bound;
 			y_min = bottom_bound;
 			y_max = top_bound;
+		}
+		
+		// this method takes x,y coordinates and returns the x and y index of the partition to which these belong as a Integer array
+		public Integer[] getPartition(double x, double y) {
+			// first we prepare x and y
+			int flr_x = (int) Math.floor(x);
+			int flr_y = (int) Math.floor(y);
+								
+			// next we get the closest (lower) multiple to five and twenty respectively
+			int mod_x = flr_x % 5;
+			int new_x = flr_x - mod_x;
+			int mod_y = flr_y % 20;
+			int new_y = flr_y - mod_y;
+								
+			// for consistency, we need to check to make sure that new_x and new_y are not y_min or y_max
+			// in which case we need to decrement them by 5 or 20 respectively so they are not found in the 
+			// partition that starts at y_max or x_max which doesn't exist
+			if (new_x == x_max) {
+				// this will put it in the appropriate partition
+				new_x = new_x - 5;
+			}
+			if (new_y == y_max) {
+				new_y = new_y + 20;
+			}
+								
+			// now we get the x and y indexes (indexes of the partition this point is in)
+			int x_index = (int)((new_x - x_min) / 5);
+			int y_index = (int)((new_y - y_min) / 20);
+					
+			return new Integer[] {new Integer(x_index), new Integer(y_index)};
 		}
 		
 		public void map(LongWritable key, Text value, Context context) {
@@ -188,46 +244,31 @@ public class SpatialJoin {
 			double w = Double.parseDouble(tokens[2]);
 			double h = Double.parseDouble(tokens[3]);
 			
-			// next we look to see if the corner is in our bounds
+			// next we look to see if this corner is in our bounds
 			if ((x >= x_min && x <= x_max) && (y >= y_min && y <= y_max)) {
 				// we get the partition it is in 
-				// first we prepare x and y
-				int flr_x = (int) Math.floor(x);
-				int flr_y = (int) Math.floor(y);
-				
-				// next we get the closest multiple to five and twenty respectively
-				int mod_x = flr_x % 5;
-				int new_x = flr_x - mod_x;
-				int mod_y = flr_y % 20;
-				int new_y = flr_y - mod_y;
+				Integer[] indexes = getPartition(x,y);
 				
 				// now we get the x and y indexes
-				int x_index = (int)((new_x - x_min) / 5);
-				int y_index = (int)((new_y - y_min) / 20);
+				Integer x_index = indexes[0];
+				Integer y_index = indexes[1];
 				
 				// now we go ahead and assign the key and value
-				Text out_key = new Text(new Integer(x_index).toString() + "," + new Integer(y_index).toString());
+				Text out_key = new Text(x_index.toString() + "," + y_index.toString());
 				try {
 					context.write(out_key, value);
 				} catch(Exception e) {
 				}
-			} // now we look at the lower right corner
+			} // we look at the lower right corner
 			else if ((x + w >= x_min && x + w <= x_max) && (y - h >= y_min && y - h <= y_max)) {
-				// first we prepare x and y
-				int flr_x = (int) Math.floor(x + w);
-				int flr_y = (int) Math.floor(y - h);
-				
-				// next we get the closest multiple to five and twenty respectively
-				int mod_x = flr_x % 5;
-				int new_x = flr_x - mod_x;
-				int mod_y = flr_y % 20;
-				int new_y = flr_y - mod_y;
+				// we get the partition it is in 
+				Integer[] indexes = getPartition(x + w,y - h);
 				
 				// now we get the x and y indexes
-				int x_index = (int)((new_x - x_min) / 5);
-				int y_index = (int)((new_y - y_min) / 20);
+				Integer x_index = indexes[0];
+				Integer y_index = indexes[1];
 				
-				// we may need to assign it to the partition above 
+				// we will to assign it to the partition above if it exists
 				if ((y_index + 1) * 20 + y_min < y_max) {
 					y_index = y_index + 1;
 				}
@@ -238,21 +279,14 @@ public class SpatialJoin {
 					context.write(out_key, value);
 				} catch(Exception e) {
 				}
-			} // now we look at the upper right corner
+			} // we look at the upper right corner
 			else if ((x + w >= x_min && x + w <= x_max) && (y >= y_min && y <= y_max)) {
-				// first we prepare x and y
-				int flr_x = (int) Math.floor(x + w);
-				int flr_y = (int) Math.floor(y);
-				
-				// next we get the closest multiple to five and twenty respectively
-				int mod_x = flr_x % 5;
-				int new_x = flr_x - mod_x;
-				int mod_y = flr_y % 20;
-				int new_y = flr_y - mod_y;
+				// we get the partition it is in 
+				Integer[] indexes = getPartition(x + w,y);
 				
 				// now we get the x and y indexes
-				int x_index = (int)((new_x - x_min) / 5);
-				int y_index = (int)((new_y - y_min) / 20);
+				Integer x_index = indexes[0];
+				Integer y_index = indexes[1];
 				
 				// now we go ahead and assign the key and value
 				Text out_key = new Text(new Integer(x_index).toString() + "," + new Integer(y_index).toString());
@@ -261,22 +295,15 @@ public class SpatialJoin {
 				} catch(Exception e) {
 				}
 			} // finally lower left 
-			else if ((x + w >= x_min && x + w <= x_max) && (y - h >= y_min && y - h <= y_max)) {
-				// first we prepare x and y
-				int flr_x = (int) Math.floor(x + w);
-				int flr_y = (int) Math.floor(y - h);
-				
-				// next we get the closest multiple to five and twenty respectively
-				int mod_x = flr_x % 5;
-				int new_x = flr_x - mod_x;
-				int mod_y = flr_y % 20;
-				int new_y = flr_y - mod_y;
+			else if ((x >= x_min && x <= x_max) && (y - h >= y_min && y - h <= y_max)) {
+				// we get the partition it is in 
+				Integer[] indexes = getPartition(x,y - h);
 				
 				// now we get the x and y indexes
-				int x_index = (int)((new_x - x_min) / 5);
-				int y_index = (int)((new_y - y_min) / 20);
+				Integer x_index = indexes[0];
+				Integer y_index = indexes[1];
 				
-				// we may need to assign it to the partition above 
+				// we need to assign it to the partition above if that partition exists
 				if ((y_index + 1) * 20 + y_min < y_max) {
 					y_index = y_index + 1;
 				}
@@ -333,21 +360,30 @@ public class SpatialJoin {
 				}
 			}
 			
+			double[] bounds = new double[1];
+			double x_min = 0;
+			double x_max = 0;
+			double y_min = 0;
+			double y_max = 0;
+			double x = 0;
+			double y = 0;
 			// now we assign points to rectangles
 			Set<String> names = rectangles.keySet();
+			// we loop through the rectangles
 			for (String name : names) {
-				double[] bounds = rectangles.get(name);
-				double x_min = bounds[0];
-				double x_max = bounds[0] + bounds[2];
-				double y_min = bounds[1] - bounds[3];
-				double y_max = bounds[1];
-				// now we need to go through each of the points and find the rectangles it is contained by
+				bounds = rectangles.get(name);
+				x_min = bounds[0];
+				x_max = bounds[0] + bounds[2];
+				y_min = bounds[1] - bounds[3];
+				y_max = bounds[1];
+				// now we go through each of the points and find if it is contained in the current rectangle
 				for (String point : points) {
 					String[] tokens = point.split(",");
-					double x = Double.parseDouble(tokens[0]);
-					double y = Double.parseDouble(tokens[1]);
+					x = Double.parseDouble(tokens[0]);
+					y = Double.parseDouble(tokens[1]);
 					// now we see if this point is in the current rectangle
 					if ((x <= x_max && x >= x_min) && (y <= y_max && y >= y_min)) {
+						// and if it is we add ;x,y to the end of that rectangles string
 						rectangle_map.put(name, rectangle_map.get(name) + ";" + point);
 					}
 				}
